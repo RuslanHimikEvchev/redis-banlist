@@ -17,7 +17,7 @@ class RedisBlackList
     private $capture_key = 'requests:data:';
 
     //Temporary key for listening requests
-    private $keys_handler = [
+    private $spam_listener_key = [
         'ttl_per_request' => 10,
         'name' => 'key:request:',
         'requests' => 30
@@ -53,20 +53,20 @@ class RedisBlackList
         if($autoban)
             $this->getStatus(); //Die, if ip is banned right now
 
-        $this->keys_handler['name'] = $this->keys_handler['name'] . $_SERVER['REMOTE_ADDR']; //key like key:request:12.34.56.78
+        $this->spam_listener_key['name'] = $this->spam_listener_key['name'] . $_SERVER['REMOTE_ADDR']; //key like key:request:12.34.56.78
 
-        $count_last_request = intval($this->redis->hGet($this->keys_handler['name'], 'request')); //get count of captured request null or int
+        $count_last_request = intval($this->redis->hGet($this->spam_listener_key['name'], 'request')); //get count of captured request null or int
 
-        $this->redis->hIncrBy($this->keys_handler['name'], 'request', 1); //increment count of request
+        $this->redis->hIncrBy($this->spam_listener_key['name'], 'request', 1); //increment count of request
 
         if($capture)
             $this->captureRequest(); //function for capture request uri (like apache access logs)
 
-        $this->redis->expire($this->keys_handler['name'], $this->keys_handler['ttl_per_request']); //expire key ttl between requests
-        if ($count_last_request >= $this->keys_handler['requests']) //if count of captured requests > value of config
+        $this->redis->expire($this->spam_listener_key['name'], $this->spam_listener_key['ttl_per_request']); //expire key ttl between requests
+        if ($count_last_request >= $this->spam_listener_key['requests']) //if count of captured requests > value of config
         {
             $this->redis->hSet($this->main_banlist, $_SERVER['REMOTE_ADDR'], 1); //ban this ip
-            $this->redis->expire($this->keys_handler['name'], -1); //Save key structure for banned user
+            $this->redis->expire($this->spam_listener_key['name'], -1); //Save key structure for banned user
         }
         $this->redis->close();
     }
