@@ -104,4 +104,60 @@ class RedisBlackList
         }
         return;
     }
+
+    /**
+     * @param $ip
+     * @return bool
+     */
+
+    public function unBanIP($ip)
+    {
+        if(!empty($ip))
+        {
+            $redis = $this->connect();
+            $redis->hSet($this->main_banlist, $ip, 0);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * @param $path_to_black_list /path/to/black_list.txt (string)
+     * @return bool
+     *
+     * For example, Apache can read IP black list from txt file. In VH config:
+     *
+     *      RewriteEngine On
+     *      RewriteMap access txt:/path/to/blacklist.txt
+     * in .htaccess or VH config:
+     *
+     *      RewriteEngine On (only for .htaccess)
+     *      RewriteCond ${access:%{REMOTE_ADDR}} deny [NC]
+     *      RewriteRule ^ - [L,F]
+     *
+     * Example of blacklist.txt
+     *
+     *      111.222.33.44  deny
+     *      55.66.77.88    deny
+     *
+     * More details: http://stackoverflow.com/questions/13008242/ban-ips-from-text-file-using-htaccess
+     *
+     */
+
+    public function createApacheBlackList($path_to_black_list = '/var/www/data/black_list.txt')
+    {
+        $to_list = '';
+        $redis = $this->connect();
+        $ip_arr = $redis->hGetAll($this->main_banlist);
+        // [ip] => 1 or 0
+        foreach ($ip_arr as $ip => $deny) {
+            if(intval($deny) == 0)
+                continue;
+            else
+                $deny = 'deny';
+            $to_list .= $ip . ' ' . $deny . "\n";
+        }
+        file_put_contents($path_to_black_list, $to_list);
+        return true;
+    }
 }
