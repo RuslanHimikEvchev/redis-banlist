@@ -35,14 +35,14 @@ class RedisBlackList
         $redis = $this->connect();
         if (intval($redis->hGet($this->main_banlist, $_SERVER['REMOTE_ADDR']))) {
             $this->clearUserData();
-            $redis = null;
+            $redis->close();
             header('HTTP/1.0 502 Bad Gateway');
             die();
         }
     }
 
     //Main listen function
-    public function listen()
+    public function listen($capture = false)
     {
         $this->getStatus(); //Die, if ip is banned right now
         $redis = $this->connect();
@@ -52,14 +52,15 @@ class RedisBlackList
 
         $redis->hIncrBy($this->keys_handler['name'], 'request', 1); //increment count of request
 
-        $this->captureRequest(); //function for capture request uri (like apache access logs)
+        if($capture)
+            $this->captureRequest(); //function for capture request uri (like apache access logs)
 
         $redis->expire($this->keys_handler['name'], $this->keys_handler['ttl_per_request']); //expire key ttl between requests
         if ($count_last_request >= $this->keys_handler['requests']) //if count of captured requests > value of config
         {
             $redis->hSet($this->main_banlist, $_SERVER['REMOTE_ADDR'], 1); //ban this ip
         }
-        $redis = null;
+        $redis->close();
     }
 
     //simple access logining
@@ -71,7 +72,7 @@ class RedisBlackList
         $time = $_SERVER['REQUEST_TIME'];
         $capture_value = $request . '||' . $time . '||' . uniqid('RBL-UNIQ-ID-'); //Captured request, unix timestamp, uniqid for save all requests
         $redis->sAdd($this->capture_key, $capture_value);
-        $redis = null;
+        $redis->close();
         return;
     }
 
@@ -84,10 +85,10 @@ class RedisBlackList
             foreach ($banned_arr as $ip) {
                 $info_arr[$ip] = $redis->sMembers($this->capture_key . $ip);
             }
-            $redis = null;
+            $redis->close();
             return $info_arr;
         }
-        $redis = null;
+        $redis->close();
         return [];
     }
 
@@ -116,6 +117,7 @@ class RedisBlackList
         {
             $redis = $this->connect();
             $redis->hSet($this->main_banlist, $ip, 0);
+            $redis->close();
             return true;
         }
         return false;
@@ -158,6 +160,7 @@ class RedisBlackList
             $to_list .= $ip . ' ' . $deny . "\n";
         }
         file_put_contents($path_to_black_list, $to_list);
+        $redis->close();
         return true;
     }
 }
