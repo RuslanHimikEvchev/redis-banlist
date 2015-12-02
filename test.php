@@ -4,7 +4,7 @@ require_once 'Banlist.php';
 $ban = new RedisBlackList();
 
 
-//$ban->listen(false);
-$ban->createApacheBlackList();
+//$ban->listen();
+//$ban->createBlackList('/var/www/data/black_list', 'apache');
 
 //print_r($ban->getData());

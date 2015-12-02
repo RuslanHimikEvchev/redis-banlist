@@ -2,6 +2,8 @@
 
 class RedisBlackList
 {
+    private $redis;
+
     //Redis connection params
     private $config = [
         'host' => 'localhost',
@@ -21,6 +23,11 @@ class RedisBlackList
         'requests' => 30
     ];
 
+    public function __construct()
+    {
+        $this->redis = $this->connect();
+    }
+
     //Redis connection handler
     private function connect()
     {
@@ -32,63 +39,62 @@ class RedisBlackList
     //Check if this ip is banned
     private function getStatus()
     {
-        $redis = $this->connect();
-        if (intval($redis->hGet($this->main_banlist, $_SERVER['REMOTE_ADDR']))) {
+        if (intval($this->redis->hGet($this->main_banlist, $_SERVER['REMOTE_ADDR']))) {
             $this->clearUserData();
-            $redis->close();
-            header('HTTP/1.0 502 Bad Gateway');
+            $this->redis->close();
+            header('HTTP/1.0 403 Forbidden');
             die();
         }
     }
 
     //Main listen function
-    public function listen($capture = false)
+    public function listen($capture = false, $autoban = false)
     {
-        $this->getStatus(); //Die, if ip is banned right now
-        $redis = $this->connect();
+        if($autoban)
+            $this->getStatus(); //Die, if ip is banned right now
+
         $this->keys_handler['name'] = $this->keys_handler['name'] . $_SERVER['REMOTE_ADDR']; //key like key:request:12.34.56.78
 
-        $count_last_request = intval($redis->hGet($this->keys_handler['name'], 'request')); //get count of captured request null or int
+        $count_last_request = intval($this->redis->hGet($this->keys_handler['name'], 'request')); //get count of captured request null or int
 
-        $redis->hIncrBy($this->keys_handler['name'], 'request', 1); //increment count of request
+        $this->redis->hIncrBy($this->keys_handler['name'], 'request', 1); //increment count of request
 
         if($capture)
             $this->captureRequest(); //function for capture request uri (like apache access logs)
 
-        $redis->expire($this->keys_handler['name'], $this->keys_handler['ttl_per_request']); //expire key ttl between requests
+        $this->redis->expire($this->keys_handler['name'], $this->keys_handler['ttl_per_request']); //expire key ttl between requests
         if ($count_last_request >= $this->keys_handler['requests']) //if count of captured requests > value of config
         {
-            $redis->hSet($this->main_banlist, $_SERVER['REMOTE_ADDR'], 1); //ban this ip
+            $this->redis->hSet($this->main_banlist, $_SERVER['REMOTE_ADDR'], 1); //ban this ip
+            $this->redis->expire($this->keys_handler['name'], -1); //Save key structure for banned user
         }
-        $redis->close();
+        $this->redis->close();
     }
 
     //simple access logining
     private function captureRequest()
     {
-        $redis = $this->connect();
         $this->capture_key = $this->capture_key . $_SERVER['REMOTE_ADDR'];
         $request = $_SERVER['REQUEST_URI'];
         $time = $_SERVER['REQUEST_TIME'];
         $capture_value = $request . '||' . $time . '||' . uniqid('RBL-UNIQ-ID-'); //Captured request, unix timestamp, uniqid for save all requests
-        $redis->sAdd($this->capture_key, $capture_value);
-        $redis->close();
+        $this->redis->sAdd($this->capture_key, $capture_value);
+        $this->redis->close();
         return;
     }
 
     public function getData()
     {
         $info_arr = [];
-        $redis = $this->connect();
-        $banned_arr = $redis->sMembers($this->main_banlist);
+        $banned_arr = $this->redis->sMembers($this->main_banlist);
         if (!empty($banned_arr)) {
             foreach ($banned_arr as $ip) {
-                $info_arr[$ip] = $redis->sMembers($this->capture_key . $ip);
+                $info_arr[$ip] = $this->redis->sMembers($this->capture_key . $ip);
             }
-            $redis->close();
+            $this->redis->close();
             return $info_arr;
         }
-        $redis->close();
+        $this->redis->close();
         return [];
     }
 
@@ -115,9 +121,8 @@ class RedisBlackList
     {
         if(!empty($ip))
         {
-            $redis = $this->connect();
-            $redis->hSet($this->main_banlist, $ip, 0);
-            $redis->close();
+            $this->redis->hSet($this->main_banlist, $ip, 0);
+            $this->redis->close();
             return true;
         }
         return false;
@@ -125,6 +130,7 @@ class RedisBlackList
 
     /**
      * @param $path_to_black_list /path/to/black_list.txt (string)
+     * @param $type string type of web server
      * @return bool
      *
      * For example, Apache can read IP black list from txt file. In VH config:
@@ -144,23 +150,31 @@ class RedisBlackList
      *
      * More details: http://stackoverflow.com/questions/13008242/ban-ips-from-text-file-using-htaccess
      *
+     * For nginx
+     *  include /path/to/deny/list.conf
+     *
      */
 
-    public function createApacheBlackList($path_to_black_list = '/var/www/data/black_list.txt')
+    public function createBlackList($path_to_black_list = '/var/www/data/black_list', $type = 'apache')
     {
         $to_list = '';
-        $redis = $this->connect();
-        $ip_arr = $redis->hGetAll($this->main_banlist);
+
+        $file_ext = ($type == 'apache') ? '.txt' : '.conf';
+
+        $ip_arr = $this->redis->hGetAll($this->main_banlist);
         // [ip] => 1 or 0
         foreach ($ip_arr as $ip => $deny) {
             if(intval($deny) == 0)
                 continue;
             else
                 $deny = 'deny';
-            $to_list .= $ip . ' ' . $deny . "\n";
+            if($type == 'apache')
+                $to_list .= $ip . ' ' . $deny . "\n";
+            if($type == 'nginx')
+                $to_list .= $deny . ' ' . $ip . ";\n";
         }
-        file_put_contents($path_to_black_list, $to_list);
-        $redis->close();
+        file_put_contents($path_to_black_list.$file_ext, $to_list);
+        $this->redis->close();
         return true;
     }
 }
